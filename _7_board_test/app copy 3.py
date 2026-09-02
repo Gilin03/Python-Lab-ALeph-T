@@ -12,6 +12,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__)
 
+# 새로운 스키마(my_new_board_db)로 접속하도록 설정 변경
 app.config['SQLALCHEMY_DATABASE_URI'] = (
     'mysql+pymysql://root:123456@localhost:3306/my_new_board_db'
 )
@@ -41,6 +42,7 @@ class Post(db.Model):
   author = db.relationship('User', backref=db.backref('posts', lazy=True))
 
 
+# 앱 실행 시 새로운 스키마 내에 테이블 자동 생성
 with app.app_context():
   db.create_all()
 
@@ -76,6 +78,7 @@ def index():
   return render_template('index.html')
 
 
+# 목록 조회 (검색, 필터, 커서 기반 페이징)
 @app.route('/api/posts', methods=['GET'])
 def get_posts():
   cursor = request.args.get('cursor', type=int)
@@ -84,16 +87,23 @@ def get_posts():
   category = request.args.get('category', default='', type=str)
 
   query = Post.query
+
+  # 카테고리 필터
   if category and category != '전체':
     query = query.filter(Post.category == category)
+
+  # 검색 기능 (제목 또는 내용)
   if search:
     query = query.filter(
         (Post.title.like(f'%{search}%')) | (Post.content.like(f'%{search}%'))
     )
+
+  # 커서 기반 페이징 (ID 내림차순 기준 이전 데이터 로드)
   if cursor:
     query = query.filter(Post.id < cursor)
 
   posts = query.order_by(Post.id.desc()).limit(limit + 1).all()
+
   has_more = len(posts) > limit
   if has_more:
     posts = posts[:limit]
@@ -119,11 +129,13 @@ def get_posts():
   })
 
 
+# 게시글 작성
 @app.route('/api/posts', methods=['POST'])
 @jwt_required()
 def create_post():
   current_user_id = int(get_jwt_identity())
   data = request.get_json()
+
   new_post = Post(
       title=data['title'],
       content=data['content'],
@@ -135,11 +147,13 @@ def create_post():
   return jsonify({'msg': '게시글이 등록되었습니다.'}), 201
 
 
+# 게시글 수정
 @app.route('/api/posts/<int:id>', methods=['PUT'])
 @jwt_required()
 def update_post(id):
   current_user_id = int(get_jwt_identity())
   post = Post.query.get_or_404(id)
+
   if post.author_id != current_user_id:
     return jsonify({'msg': '권한이 없습니다.'}), 403
 
@@ -148,19 +162,23 @@ def update_post(id):
   post.content = data.get('content', post.content)
   post.category = data.get('category', post.category)
   db.session.commit()
+
   return jsonify({'msg': '수정되었습니다.'})
 
 
+# 게시글 삭제
 @app.route('/api/posts/<int:id>', methods=['DELETE'])
 @jwt_required()
 def delete_post(id):
   current_user_id = int(get_jwt_identity())
   post = Post.query.get_or_404(id)
+
   if post.author_id != current_user_id:
     return jsonify({'msg': '권한이 없습니다.'}), 403
 
   db.session.delete(post)
   db.session.commit()
+
   return jsonify({'msg': '삭제되었습니다.'})
 
 
@@ -173,9 +191,8 @@ PUBLIC_API_URL = (
 )
 
 
-# 두 가지 경로 요청 모두 수용하도록 라우트 복수 설정 + 데이터 배열화 반환
+# 1) 외부 공공 API 데이터를 100건 받아와서 JSON으로 반환하는 백엔드 라우트
 @app.route('/api/public/posts', methods=['GET'])
-@app.route('/api/public-posts', methods=['GET'])
 def get_public_posts():
   params = {
       'serviceKey': PUBLIC_API_KEY,
@@ -186,10 +203,7 @@ def get_public_posts():
   try:
     response = requests.get(PUBLIC_API_URL, params=params)
     if response.status_code == 200:
-      data = response.json()
-      # 공공데이터 포털 표준 응답 구조에서 item 배열 안전하게 추출
-      items = data.get('getRecommendedKr', {}).get('item', [])
-      return jsonify(items)
+      return response.json()
     else:
       return (
           jsonify(
@@ -201,11 +215,13 @@ def get_public_posts():
     return jsonify({'msg': '서버 통신 에러 발생', 'error': str(e)}), 500
 
 
+# 2) 공공데이터 목록 보기 페이지 라우트
 @app.route('/public-posts')
 def public_posts_page():
   return render_template('public_posts.html')
 
 
+# 3) 공공데이터 상세 보기 페이지 라우트 (UC_SEQ 기준)
 @app.route('/public-posts/<int:uc_seq>')
 def public_post_detail_page(uc_seq):
   return render_template('public_detail.html', uc_seq=uc_seq)

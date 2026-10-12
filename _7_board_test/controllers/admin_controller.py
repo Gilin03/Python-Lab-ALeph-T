@@ -16,7 +16,7 @@ from functools import wraps
 from flask import Blueprint, current_app, jsonify, request
 
 from extensions import db
-from models import BlockedIP, Incident, SecurityEvent, User
+from models import BlockedIP, Incident, Post, SecurityEvent, User
 
 from .pagination import SortError, paginate
 from .rbac import VALID_ROLES, current_user   # 등급 정의는 rbac 한 곳에서
@@ -162,6 +162,55 @@ def lock_users_bulk():
   return jsonify({'msg': f'{len(changed)}명 차단', 'count': len(changed),
                   'changed': changed, 'skipped': skipped, 'not_found': not_found,
                   'self_skipped': self_skipped, 'actor': actor}), 200
+
+
+# 지우면 안 되는 시스템 계정 — soarbot 은 '보안' 자동 공지글의 작성자다.
+_PROTECTED_USERS = ('soarbot',)
+
+
+@admin_bp.route('/users/delete', methods=['POST'])
+@admin_required
+def delete_users_bulk():
+  """회원 일괄 삭제. body: {ids: [..]}
+
+  - 그 회원의 게시글도 함께 지운다. posts.author_id 는 NOT NULL 외래키라
+    글을 남기면 MySQL 은 FK 오류, SQLite 는 작성자 없는 고아 글이 된다.
+  - 본인(self_skipped)·시스템 계정(protected)은 건너뛴다.
+  - '전원 삭제(all)' 는 일부러 없다 — 되돌릴 수 없다. 고른 id 로만 지운다.
+  - 감사기록: security_events 에 한 줄(source='admin-console')."""
+  data = request.get_json(silent=True) or {}
+  ids = _parse_ids(data)
+  if ids is None:
+    return jsonify({'msg': f'ids(정수 목록, 1~{_BULK_MAX}개)가 필요합니다.'}), 400
+
+  actor = getattr(request, 'actor', 'unknown')
+  me = getattr(request, 'actor_id', None)
+  wanted = set(ids)
+  users = User.query.filter(User.id.in_(wanted)).all()
+  not_found = sorted(wanted - {u.id for u in users})
+  self_skipped = [u.id for u in users if u.id == me]
+  protected = sorted(u.id for u in users if u.username in _PROTECTED_USERS and u.id != me)
+  targets = [u for u in users if u.id != me and u.username not in _PROTECTED_USERS]
+  target_ids = [u.id for u in targets]
+
+  posts_deleted = 0
+  if targets:
+    names = ', '.join(sorted(u.username for u in targets))
+    # 글을 먼저 지운다 — 회원이 먼저 사라지면 FK 가 걸린다.
+    posts_deleted = (Post.query.filter(Post.author_id.in_(target_ids))
+                     .delete(synchronize_session=False))
+    User.query.filter(User.id.in_(target_ids)).delete(synchronize_session=False)
+    db.session.add(SecurityEvent(
+        student=actor[:50], src_ip='0.0.0.0', fail_count=0, decision='deny',
+        severity='Medium',
+        reason=f'관리자 회원 삭제 {len(targets)}명(게시글 {posts_deleted}개 포함)'[:200],
+        users=names[:255], source='admin-console'))
+  db.session.commit()
+  changed = sorted(target_ids)
+  return jsonify({'msg': f'{len(changed)}명 삭제', 'count': len(changed),
+                  'changed': changed, 'posts_deleted': posts_deleted,
+                  'not_found': not_found, 'self_skipped': self_skipped,
+                  'protected': protected, 'actor': actor}), 200
 
 
 @admin_bp.route('/users/unlock', methods=['POST'])

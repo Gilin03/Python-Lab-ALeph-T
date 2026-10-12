@@ -10,7 +10,7 @@
 
   {% include 'partials/_nav.html' %}
 
-  <main class="max-w-5xl mx-auto px-4 py-6 flex-1 w-full">
+  <main class="max-w-5xl xl:max-w-7xl 2xl:max-w-screen-2xl mx-auto px-4 py-6 flex-1 w-full">
 
     <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-6">
       <div>
@@ -99,7 +99,7 @@
         <span id="inc-action-msg" class="ml-auto"></span>
       </div>
       <div class="overflow-x-auto">
-        <table class="w-full text-sm whitespace-nowrap">
+        <table class="resp-table w-full text-sm whitespace-nowrap">
           <!-- data-sort 가 있는 머리글만 눌러서 정렬된다(서버 허용 컬럼과 같다) -->
           <thead id="incident-head" class="bg-gray-50 text-gray-600">
             <tr>
@@ -154,7 +154,7 @@
       </div>
       <!-- 표는 좁은 화면에서 가로 스크롤 -->
       <div class="overflow-x-auto">
-        <table class="w-full text-sm whitespace-nowrap">
+        <table class="resp-table w-full text-sm whitespace-nowrap">
           <thead id="event-head" class="bg-gray-50 text-gray-600">
             <tr>
               <th data-sort="id" class="text-left px-4 py-2 font-medium">#</th>
@@ -279,8 +279,8 @@
           <td class="px-4 py-2">${badge(e.decision)}</td>
           <td class="px-4 py-2 font-medium ${sevColor(e.severity)}">${esc(e.severity)}</td>
           <td class="px-4 py-2">${e.fail_count}</td>
-          <td class="px-4 py-2 text-gray-600 max-w-xs truncate" title="${esc(e.reason)}">${esc(e.reason)}</td>
-          <td class="px-4 py-2 text-gray-400">${esc((e.created_at || '').replace('T', ' ').slice(0, 19))}</td>
+          <td class="wrap-cell px-4 py-2 text-gray-600 max-w-xs truncate" title="${esc(e.reason)}">${esc(e.reason)}</td>
+          <td class="date-cell px-4 py-2 text-gray-400">${esc((e.created_at || '').replace('T', ' ').slice(0, 19))}</td>
         </tr>`).join('');
 
       renderPager(document.getElementById('event-pager'), d,
@@ -346,10 +346,10 @@
           <td class="px-4 py-2 font-medium ${sevColor(t.severity)}">${esc(t.severity)}</td>
           <td class="px-4 py-2">${statusBadge(t.status)}</td>
           <td class="px-4 py-2">${t.event_count}</td>
-          <td class="px-4 py-2 text-gray-600">${esc(t.actions)}</td>
-          <td class="px-4 py-2 text-gray-600 max-w-xs truncate" title="${esc(t.summary)}">${esc(t.title)}</td>
-          <td class="px-4 py-2 text-gray-400">${esc((t.created_at || '').replace('T', ' ').slice(0, 19))}</td>
-          <td class="px-4 py-2 text-gray-400">${esc((t.closed_at || '-').replace('T', ' ').slice(0, 19))}</td>
+          <td class="wrap-cell px-4 py-2 text-gray-600">${esc(t.actions)}</td>
+          <td class="wrap-cell px-4 py-2 text-gray-600 max-w-xs truncate" title="${esc(t.summary)}">${esc(t.title)}</td>
+          <td class="date-cell px-4 py-2 text-gray-400">${esc((t.created_at || '').replace('T', ' ').slice(0, 19))}</td>
+          <td class="date-cell px-4 py-2 text-gray-400">${esc((t.closed_at || '-').replace('T', ' ').slice(0, 19))}</td>
         </tr>`).join('');
 
       updateSelectionUi();

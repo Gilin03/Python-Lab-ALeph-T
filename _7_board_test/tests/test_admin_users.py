@@ -224,3 +224,96 @@ def test_anonymous_and_plain_user_rejected(client, url):
   assert client.post(url, headers=jwt_for(client, 'plain'),
                      json={'ids': [xid]}).status_code in (401, 403)
   assert client.get(LIST + '?page=1', headers=jwt_for(client, 'plain2')).status_code in (401, 403)
+
+
+# ── 일괄 삭제 ────────────────────────────────────────────
+DELETE = '/api/admin/users/delete'
+
+
+def write_post(client, username, title='hello'):
+  token = client.post('/api/auth/login', json={'username': username, 'password': PW}
+                      ).get_json()['access_token']
+  res = client.post('/api/posts', headers={'Authorization': f'Bearer {token}'},
+                    json={'title': title, 'content': 'c'})
+  assert res.status_code in (200, 201), res.get_data(as_text=True)
+
+
+def usernames(client):
+  return sorted(u['username'] for u in client.get(LIST, headers=ADMIN).get_json()['users'])
+
+
+def test_bulk_delete_selected(client):
+  register(client, 'x', 'y', 'z')
+  res = client.post(DELETE, headers=ADMIN, json={'ids': ids_of(client, 'x', 'z')})
+  assert res.status_code == 200
+  body = res.get_json()
+  assert body['count'] == 2
+  assert usernames(client) == ['y']
+
+
+def test_delete_removes_their_posts_too(client):
+  """posts.author_id 는 NOT NULL 외래키 — 글을 남겨 두면 고아 글이 되거나 FK 오류."""
+  register(client, 'x', 'y')
+  write_post(client, 'x', 'x-post'); write_post(client, 'x', 'x-post2')
+  write_post(client, 'y', 'y-post')
+  body = client.post(DELETE, headers=ADMIN, json={'ids': ids_of(client, 'x')}).get_json()
+  assert body['posts_deleted'] == 2
+  titles = [p['title'] for p in client.get('/api/posts').get_json()['posts']]
+  assert titles == ['y-post']
+
+
+def test_deleted_user_cannot_login(client):
+  register(client, 'x')
+  client.post(DELETE, headers=ADMIN, json={'ids': ids_of(client, 'x')})
+  assert client.post('/api/auth/login',
+                     json={'username': 'x', 'password': PW}).status_code == 401
+
+
+def test_admin_cannot_delete_self(client):
+  h = jwt_for(client, 'boss', 'admin')
+  register(client, 'x')
+  boss, x = ids_of(client, 'boss', 'x')
+  body = client.post(DELETE, headers=h, json={'ids': [boss, x]}).get_json()
+  assert body['changed'] == [x] and body['self_skipped'] == [boss]
+  assert usernames(client) == ['boss']
+
+
+def test_system_account_is_protected(client):
+  """soarbot 은 보안 공지글 작성자 — 지우면 다음 자동 공지가 계정을 새로 만든다."""
+  register(client, 'soarbot', 'x')
+  sb, x = ids_of(client, 'soarbot', 'x')
+  body = client.post(DELETE, headers=ADMIN, json={'ids': [sb, x]}).get_json()
+  assert body['changed'] == [x] and body['protected'] == [sb]
+  assert usernames(client) == ['soarbot']
+
+
+def test_delete_records_audit_event(client):
+  register(client, 'x')
+  client.post(DELETE, headers=ADMIN, json={'ids': ids_of(client, 'x')})
+  events = client.get('/api/security/events').get_json()['events']
+  assert any(e['source'] == 'admin-console' and 'x' in (e['users'] or '')
+             and '삭제' in e['reason'] for e in events)
+
+
+def test_delete_unknown_ids_reported(client):
+  register(client, 'x')
+  [xid] = ids_of(client, 'x')
+  body = client.post(DELETE, headers=ADMIN, json={'ids': [xid, 9999]}).get_json()
+  assert body['changed'] == [xid] and body['not_found'] == [9999]
+
+
+@pytest.mark.parametrize('payload', [{}, {'ids': []}, {'ids': 'x'}, {'ids': [True]},
+                                     {'all': True}])
+def test_delete_bad_payload_is_400(client, payload):
+  register(client, 'x')
+  assert client.post(DELETE, headers=ADMIN, json=payload).status_code == 400
+  assert usernames(client) == ['x']
+
+
+def test_delete_requires_admin(client):
+  register(client, 'x')
+  [xid] = ids_of(client, 'x')
+  assert client.post(DELETE, json={'ids': [xid]}).status_code == 401
+  assert client.post(DELETE, headers=jwt_for(client, 'plain'),
+                     json={'ids': [xid]}).status_code in (401, 403)
+  assert 'x' in usernames(client)

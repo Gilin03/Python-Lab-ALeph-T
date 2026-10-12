@@ -10,7 +10,7 @@
 
   {% include 'partials/_nav.html' %}
 
-  <main class="max-w-5xl mx-auto px-4 py-6 flex-1 w-full">
+  <main class="max-w-5xl xl:max-w-7xl 2xl:max-w-screen-2xl mx-auto px-4 py-6 flex-1 w-full">
     <div class="mb-6">
       <h2 class="text-2xl font-bold">🔐 관리자 — 회원 권한(인가) 관리</h2>
       <p class="text-sm text-gray-500 mt-1">RBAC 등급(user/gold/admin) 부여·회수. admin 계정으로 로그인해야 합니다.</p>
@@ -108,15 +108,20 @@
                   class="px-3 py-1.5 rounded bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed">
             선택 해제 (<span class="u-sel-count">0</span>)
           </button>
+          <button id="u-delete-selected" disabled
+                  class="px-3 py-1.5 rounded bg-gray-800 text-white font-medium hover:bg-black disabled:opacity-40 disabled:cursor-not-allowed">
+            🗑 선택 삭제 (<span class="u-sel-count">0</span>)
+          </button>
           <button id="u-unlock-all"
                   class="px-3 py-1.5 rounded border border-emerald-300 text-emerald-700 font-medium hover:bg-emerald-50">
             차단 회원 전체 해제
           </button>
-          <span class="text-gray-400">전체 해제는 지금 검색·역할 조건의 차단 회원 전부(다른 페이지 포함)</span>
+          <span class="text-gray-400">전체 해제는 지금 검색·역할 조건의 차단 회원 전부(다른 페이지 포함)
+            · 삭제는 그 회원의 게시글까지 지우며 되돌릴 수 없다(본인·soarbot 제외)</span>
           <span id="u-msg" class="ml-auto"></span>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm whitespace-nowrap">
+          <table class="resp-table w-full text-sm whitespace-nowrap">
             <!-- data-sort 가 있는 머리글만 눌러서 정렬된다(서버 _USER_SORTS 와 같다) -->
             <thead id="user-head" class="bg-gray-50 text-gray-600">
               <tr>
@@ -146,7 +151,8 @@
       <p class="text-xs text-gray-400">
         API: <code>GET /api/admin/users</code>(?q·role·locked·page·sort) · <code>POST /api/admin/grant</code> ·
         <code>POST /api/admin/revoke</code> · <code>GET /api/admin/violations</code> ·
-        <code>POST /api/admin/users/lock</code> · <code>POST /api/admin/users/unlock</code>
+        <code>POST /api/admin/users/lock</code> · <code>POST /api/admin/users/unlock</code> ·
+        <code>POST /api/admin/users/delete</code>
         — 회수(revoke)는 파이썬 봇→Graylog→n8n 이 자동으로도 호출합니다.
       </p>
     </div>
@@ -253,6 +259,9 @@
             ? `<button data-id="${u.id}" class="unlock-one bg-emerald-600 text-white px-2 py-0.5 rounded text-xs hover:bg-emerald-700">해제</button>`
             : (u.username === me ? ''
               : `<button data-id="${u.id}" data-user="${esc(u.username)}" class="lock-one border border-red-300 text-red-700 px-2 py-0.5 rounded text-xs hover:bg-red-50">차단</button>`);
+          // 본인·시스템 계정은 삭제 버튼을 숨긴다(서버도 건너뛴다).
+          const deleteBtn = (u.username === me || PROTECTED.includes(u.username)) ? ''
+            : `<button data-id="${u.id}" data-user="${esc(u.username)}" class="delete-one border border-gray-300 text-gray-600 px-2 py-0.5 rounded text-xs hover:bg-gray-100">삭제</button>`;
           return `<tr class="hover:bg-gray-50 ${u.is_locked ? 'bg-red-50' : ''}">
             <td class="px-4 py-2"><input type="checkbox" class="u-check cursor-pointer" value="${u.id}"></td>
             <td class="px-4 py-2 text-gray-400">${u.id}</td>
@@ -260,10 +269,10 @@
             <td class="px-4 py-2">${BADGE[u.role] || esc(u.role)}</td>
             <td class="px-4 py-2">${lockBadge(u.is_locked)}</td>
             <td class="px-4 py-2 ${u.failed_logins ? 'text-red-600 font-medium' : 'text-gray-400'}">${u.failed_logins ?? 0}</td>
-            <td class="px-4 py-2 text-gray-400">${u.is_locked ? ts(u.locked_at) : '-'}</td>
-            <td class="px-4 py-2 text-gray-600 max-w-xs truncate" title="${esc(u.lock_reason)}">${esc(u.lock_reason || '')}</td>
+            <td class="date-cell px-4 py-2 text-gray-400">${u.is_locked ? ts(u.locked_at) : '-'}</td>
+            <td class="wrap-cell px-4 py-2 text-gray-600 max-w-xs truncate" title="${esc(u.lock_reason)}">${esc(u.lock_reason || '')}</td>
             <td class="px-4 py-2 text-gray-600">${esc(u.role_granted_by || '')}</td>
-            <td class="px-4 py-2 space-x-1">${lockBtn}${revokeBtn}</td>
+            <td class="px-4 py-2 space-x-1">${lockBtn}${revokeBtn}${deleteBtn}</td>
           </tr>`;
         }).join('');
 
@@ -281,6 +290,7 @@
       document.querySelectorAll('.u-sel-count').forEach(el => { el.textContent = uSelected.size; });
       document.getElementById('u-lock-selected').disabled = uSelected.size === 0;
       document.getElementById('u-unlock-selected').disabled = uSelected.size === 0;
+      document.getElementById('u-delete-selected').disabled = uSelected.size === 0;
       const boxes = document.querySelectorAll('#user-rows .u-check');
       const all = document.getElementById('u-check-all');
       all.checked = boxes.length > 0 && uSelected.size === boxes.length;
@@ -304,7 +314,9 @@
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { showUserMsg(d.msg || `${verb} 실패 (HTTP ${r.status})`, false); return; }
       const extra = (d.skipped?.length ? ` · 이미 ${verb} ${d.skipped.length}` : '')
+        + (d.posts_deleted ? ` · 게시글 ${d.posts_deleted}개 함께 삭제` : '')
         + (d.self_skipped?.length ? ' · 본인 계정 제외' : '')
+        + (d.protected?.length ? ' · 시스템 계정 제외' : '')
         + (d.not_found?.length ? ` · 없음 ${d.not_found.length}` : '');
       showUserMsg(`${d.count}명 ${verb}했습니다${extra}`, true);
       refreshUsers();
@@ -314,6 +326,10 @@
       { ids, reason: '관리자 페이지 수동 차단' }, `${label} 차단할까요? (로그인이 막힙니다)`, '차단');
     const unlockUsers = (ids, label) => bulkUsers('/api/admin/users/unlock',
       { ids }, `${label} 차단 해제할까요?`, '해제');
+    // 서버 _PROTECTED_USERS 와 같다 — 화면에서 삭제 버튼을 숨기는 용도일 뿐, 차단은 서버가 한다.
+    const PROTECTED = ['soarbot'];
+    const deleteUsers = (ids, label) => bulkUsers('/api/admin/users/delete',
+      { ids }, `${label} 삭제할까요?\n\n작성한 게시글도 함께 삭제되며 되돌릴 수 없습니다.`, '삭제');
 
     // 행 안의 체크박스·버튼은 다시 그려질 때마다 새로 생기므로 tbody 에 한 번만 위임한다.
     document.getElementById('user-rows').addEventListener('change', (e) => {
@@ -328,6 +344,7 @@
       if (b.classList.contains('revoke-btn')) revoke(b.dataset.user);
       else if (b.classList.contains('lock-one')) lockUsers([Number(b.dataset.id)], `${b.dataset.user} 을(를)`);
       else if (b.classList.contains('unlock-one')) unlockUsers([Number(b.dataset.id)], '이 회원을');
+      else if (b.classList.contains('delete-one')) deleteUsers([Number(b.dataset.id)], `${b.dataset.user} 을(를)`);
     });
     document.getElementById('u-check-all').addEventListener('change', (e) => {
       document.querySelectorAll('#user-rows .u-check').forEach(cb => {
@@ -342,6 +359,9 @@
     });
     document.getElementById('u-unlock-selected').addEventListener('click', () => {
       if (uSelected.size) unlockUsers([...uSelected], `선택한 ${uSelected.size}명을`);
+    });
+    document.getElementById('u-delete-selected').addEventListener('click', () => {
+      if (uSelected.size) deleteUsers([...uSelected], `선택한 ${uSelected.size}명을`);
     });
     document.getElementById('u-unlock-all').addEventListener('click', () => {
       const q = document.getElementById('u-search').value.trim();
